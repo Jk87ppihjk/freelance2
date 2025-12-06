@@ -55,9 +55,9 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
 });
 
 
-// --- NOVO: Rota para Perfil e Posts de um Usuário (GET /api/posts/profile/:userId) ---
-// Note que você pode usar req.user.id se quiser buscar o perfil do próprio usuário logado.
+// --- Rota para Perfil e Posts de um Usuário (GET /api/posts/profile/:userId) (Mantida) ---
 router.get('/profile/:userId', authMiddleware, async (req, res) => {
+    // ... (lógica existente de busca de perfil)
     const targetUserId = req.params.userId;
     
     if (!targetUserId) {
@@ -100,6 +100,51 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
         res.status(500).json({ message: 'Erro interno do servidor ao carregar o perfil.' });
     }
 });
+
+
+// --- NOVO: Rota de Busca (GET /api/posts/search) ---
+router.get('/search', authMiddleware, async (req, res) => {
+    const { query, type = 'projects' } = req.query; // 'query' é o termo de busca, 'type' é 'projects' ou 'freelancers'
+    const searchTerm = `%${query || ''}%`;
+
+    if (!query) {
+         return res.status(400).json({ message: 'O termo de busca (query) é obrigatório.' });
+    }
+
+    try {
+        if (type === 'freelancers') {
+            // Busca por Freelancers (Usuários)
+            const [freelancers] = await db.query(
+                `SELECT id, name, job_title, profile_picture_url, location, skills 
+                 FROM users 
+                 WHERE name LIKE ? OR job_title LIKE ? OR skills LIKE ? 
+                 LIMIT 20`, 
+                [searchTerm, searchTerm, searchTerm]
+            );
+            return res.json({ type: 'freelancers', results: freelancers });
+
+        } else { // type === 'projects' (Default)
+            // Busca por Projetos (Posts)
+            const [projects] = await db.query(
+                `SELECT 
+                    p.id, p.title, p.description, p.thumbnail_url,
+                    u.name as user_name, u.profile_picture_url as user_photo
+                 FROM posts p
+                 JOIN users u ON p.user_id = u.id
+                 WHERE p.visibility = "public"
+                 AND (p.title LIKE ? OR p.description LIKE ? OR p.tags LIKE ?)
+                 LIMIT 20`,
+                [searchTerm, searchTerm, searchTerm]
+            );
+            return res.json({ type: 'projects', results: projects });
+        }
+
+    } catch (error) {
+        console.error('Erro na busca:', error);
+        res.status(500).json({ message: 'Erro interno do servidor durante a busca.' });
+    }
+});
+
 
 // --- Rota para o Feed Principal (GET /api/posts/feed) (Mantida) ---
 router.get('/feed', authMiddleware, async (req, res) => {
