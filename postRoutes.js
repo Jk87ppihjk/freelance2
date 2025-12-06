@@ -24,6 +24,7 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
     }
 
     try {
+        // 1. Upload do arquivo para o Cloudinary
         const result = await cloudinary.uploader.upload(
             `data:${videoFile.mimetype};base64,${videoFile.buffer.toString('base64')}`,
             {
@@ -36,6 +37,7 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
         const videoUrl = result.secure_url;
         const thumbnailUrl = result.secure_url.replace(/\.[a-z0-9]+$/, '.jpg'); 
 
+        // 2. Salvar metadados no MySQL
         const tagsArray = tags ? JSON.stringify(tags.split(',').map(t => t.trim())) : '[]';
 
         const [dbResult] = await db.query(
@@ -69,13 +71,13 @@ router.post('/:postId/like', authMiddleware, async (req, res) => {
     }
     
     try {
-        // --- VERIFICAÇÃO DE EXISTÊNCIA (CORREÇÃO) ---
+        // --- VERIFICAÇÃO DE EXISTÊNCIA DO POST ---
         const [posts] = await db.query('SELECT id FROM posts WHERE id = ?', [postId]);
         if (posts.length === 0) {
             console.warn(`Tentativa de curtir post com ID não existente: ${postId}`);
             return res.status(404).json({ message: 'Post não encontrado no banco de dados. (Pode ser dado simulado)' });
         }
-        // ---------------------------------------------
+        // -----------------------------------------
 
         const [existingLike] = await db.query(
             'SELECT * FROM post_likes WHERE user_id = ? AND post_id = ?',
@@ -107,7 +109,6 @@ router.post('/:postId/like', authMiddleware, async (req, res) => {
         }
 
     } catch (error) {
-        // Loga o erro, mas agora o erro de FK não deve mais acontecer aqui
         console.error('Erro ao processar like/unlike:', error);
         res.status(500).json({ message: 'Erro interno do servidor.' });
     }
@@ -140,7 +141,7 @@ router.get('/feed', authMiddleware, async (req, res) => {
             return res.json({
                 message: 'Nenhum post encontrado. Retornando dados simulados.',
                 posts: [
-                    // MANTEM ID ALTO PARA SIMULAR DADO, mas o backend irá barrar o like
+                    // MANTEM ID ALTO PARA SIMULAR DADO. O backend irá barrar as interações se não for real.
                     { id: 99, title: 'Mock Post: UI Design', description: 'Simulação de um projeto de UI/UX moderno.', video_url: 'https://assets.mixkit.co/videos/preview/mixkit-man-working-on-his-laptop-330-large.mp4', thumbnail_url: 'https://via.placeholder.com/600x1000?text=Mock+Thumb', likes: 120, views: 500, user_name: 'Dev Teste', user_email: 'dev@teste.com', is_liked: false, comments_count: 5 },
                 ]
             });
@@ -168,6 +169,14 @@ router.post('/:postId/comments', authMiddleware, async (req, res) => {
     }
 
     try {
+        // --- VERIFICAÇÃO DE EXISTÊNCIA DO POST (CORREÇÃO) ---
+        const [posts] = await db.query('SELECT id FROM posts WHERE id = ?', [postId]);
+        if (posts.length === 0) {
+            console.warn(`Tentativa de comentar em post com ID não existente: ${postId}`);
+            return res.status(404).json({ message: 'Post não encontrado no banco de dados. Impossível comentar.' });
+        }
+        // -----------------------------------------------------
+
         const [result] = await db.query(
             'INSERT INTO post_comments (post_id, user_id, content) VALUES (?, ?, ?)',
             [postId, userId, content]
