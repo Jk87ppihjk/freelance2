@@ -3,9 +3,10 @@ const cors = require('cors');
 require('dotenv').config(); // Carrega as variáveis de ambiente
 
 // Importa as configurações
-const db = require('./db'); // Importa o pool de conexões (já chama testConnection)
-const cloudinary = require('./cloudinary'); // Importa a configuração do cloudinary
-const routes = require('./routes'); // Importa as rotas
+const db = require('./db'); 
+const cloudinary = require('./cloudinary'); 
+const publicRoutes = require('./routes'); // Rotas públicas/teste
+const authRoutes = require('./authRoutes'); // NOVO: Rotas de Autenticação
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -13,7 +14,6 @@ const PORT = process.env.PORT || 8080;
 // --- Configuração de Middlewares ---
 
 // CORS: Libera o acesso para todos os domínios
-// Isso atende ao seu requisito de "cors liberado para todos os dominios"
 app.use(cors({
     origin: '*', 
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
@@ -25,7 +25,8 @@ app.use(cors({
 app.use(express.json());
 
 // --- Rotas ---
-app.use('/api', routes);
+app.use('/api', publicRoutes); // Rotas existentes (status, db-test, secure)
+app.use('/api/auth', authRoutes); // NOVO: Rotas para Login e Cadastro
 
 // Rota de fallback para 404
 app.use((req, res) => {
@@ -39,7 +40,7 @@ app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
     console.log(`======================================================`);
 
-    // Log das variáveis de ambiente após a inicialização (conforme solicitado)
+    // Log das variáveis de ambiente
     console.log('\n--- VARIÁVEIS DE AMBIENTE INICIADAS (LOG DE DEPLOY) ---');
     console.log(`CLOUDINARY_CLOUD_NAME: ${process.env.CLOUDINARY_CLOUD_NAME ? 'OK' : 'FALHOU'}`);
     console.log(`DB_HOST: ${process.env.DB_HOST}`);
