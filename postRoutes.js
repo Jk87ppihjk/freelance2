@@ -314,7 +314,7 @@ router.get('/search', authMiddleware, async (req, res) => {
 
 
 // --------------------------------------------------
-// 8. NOVA Rota para Deletar Post (DELETE /api/posts/:postId)
+// 8. Rota para Deletar Post (DELETE /api/posts/:postId)
 // --------------------------------------------------
 router.delete('/:postId', authMiddleware, async (req, res) => {
     const userId = req.user.id;
@@ -332,19 +332,75 @@ router.delete('/:postId', authMiddleware, async (req, res) => {
         );
 
         if (result.affectedRows === 0) {
-            // Se nenhum post foi deletado, pode ser porque:
-            // 1. O post não existe.
-            // 2. O post existe, mas não pertence ao usuário logado (tentativa de exclusão não autorizada).
             return res.status(404).json({ message: 'Post não encontrado ou você não tem permissão para deletá-lo.' });
         }
 
-        // Devido às Chaves Estrangeiras (ON DELETE CASCADE),
-        // likes e comentários associados também serão deletados automaticamente.
         res.json({ message: 'Post deletado com sucesso!' });
 
     } catch (error) {
         console.error('Erro ao deletar post:', error);
         res.status(500).json({ message: 'Erro interno do servidor ao deletar post.' });
+    }
+});
+
+
+// --------------------------------------------------
+// 9. NOVA Rota para Editar Post (PUT /api/posts/:postId)
+// --------------------------------------------------
+router.put('/:postId', authMiddleware, async (req, res) => {
+    const userId = req.user.id;
+    const postId = req.params.postId;
+    const { title, description, tags, visibility } = req.body;
+
+    // Constrói a query de atualização dinamicamente
+    const updates = [];
+    const values = [];
+
+    if (title) {
+        updates.push('title = ?');
+        values.push(title);
+    }
+    if (description) {
+        updates.push('description = ?');
+        values.push(description);
+    }
+    if (visibility) {
+        updates.push('visibility = ?');
+        values.push(visibility);
+    }
+    if (tags) {
+        // Assume que as tags vêm como uma string separada por vírgulas e salva como JSON
+        try {
+            const tagsArray = Array.isArray(tags) ? tags : tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+            updates.push('tags = ?');
+            values.push(JSON.stringify(tagsArray));
+        } catch (e) {
+            return res.status(400).json({ message: 'Formato de tags inválido.' });
+        }
+    }
+
+    if (updates.length === 0) {
+        return res.status(400).json({ message: 'Nenhum campo fornecido para atualização.' });
+    }
+
+    // Adiciona o ID do post e o ID do usuário (para segurança)
+    values.push(postId, userId);
+    
+    // Constrói a query final: Atualiza se o ID do post e o ID do usuário forem correspondentes
+    const sql = `UPDATE posts SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`;
+
+    try {
+        const [result] = await db.query(sql, values);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Post não encontrado ou você não tem permissão para editá-lo.' });
+        }
+
+        res.json({ message: 'Post atualizado com sucesso!' });
+        
+    } catch (error) {
+        console.error('Erro ao atualizar post:', error);
+        res.status(500).json({ message: 'Erro interno do servidor ao atualizar post.' });
     }
 });
 
