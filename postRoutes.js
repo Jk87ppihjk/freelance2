@@ -6,7 +6,7 @@ const cloudinary = require('./cloudinary');
 const multer = require('multer');
 require('dotenv').config();
 
-// Configuração do Multer: Armazenamento em memória (buffer) para enviar ao Cloudinary
+// Configuração do Multer (armazenamento em memória)
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
@@ -24,7 +24,6 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
     }
 
     try {
-        // 1. Upload do arquivo para o Cloudinary
         const result = await cloudinary.uploader.upload(
             `data:${videoFile.mimetype};base64,${videoFile.buffer.toString('base64')}`,
             {
@@ -35,10 +34,8 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
         );
         
         const videoUrl = result.secure_url;
-        // Gera uma URL simples para a thumbnail (ex: mudando a extensão para .jpg)
         const thumbnailUrl = result.secure_url.replace(/\.[a-z0-9]+$/, '.jpg'); 
 
-        // 2. Salvar metadados no MySQL
         const tagsArray = tags ? JSON.stringify(tags.split(',').map(t => t.trim())) : '[]';
 
         const [dbResult] = await db.query(
@@ -61,7 +58,7 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
 
 
 // --------------------------------------------------
-// 2. NOVA Rota de Curtida/Descurtida (POST /api/posts/:postId/like)
+// 2. Rota de Curtida/Descurtida (POST /api/posts/:postId/like)
 // --------------------------------------------------
 router.post('/:postId/like', authMiddleware, async (req, res) => {
     const userId = req.user.id;
@@ -70,33 +67,38 @@ router.post('/:postId/like', authMiddleware, async (req, res) => {
     if (!postId) {
         return res.status(400).json({ message: 'ID do Post é obrigatório.' });
     }
-
+    
     try {
-        // 1. Verificar se o usuário já curtiu este post
+        // --- VERIFICAÇÃO DE EXISTÊNCIA (CORREÇÃO) ---
+        const [posts] = await db.query('SELECT id FROM posts WHERE id = ?', [postId]);
+        if (posts.length === 0) {
+            console.warn(`Tentativa de curtir post com ID não existente: ${postId}`);
+            return res.status(404).json({ message: 'Post não encontrado no banco de dados. (Pode ser dado simulado)' });
+        }
+        // ---------------------------------------------
+
         const [existingLike] = await db.query(
             'SELECT * FROM post_likes WHERE user_id = ? AND post_id = ?',
             [userId, postId]
         );
 
         if (existingLike.length > 0) {
-            // Se o like existe, removemos (Descurtir)
+            // Descurtir
             await db.query(
                 'DELETE FROM post_likes WHERE user_id = ? AND post_id = ?',
                 [userId, postId]
             );
-            // Decrementa a contagem de likes no post
             await db.query(
                 'UPDATE posts SET likes = likes - 1 WHERE id = ?',
                 [postId]
             );
             return res.json({ message: 'Post descurtido com sucesso.', liked: false });
         } else {
-            // Se o like não existe, adicionamos (Curtir)
+            // Curtir
             await db.query(
                 'INSERT INTO post_likes (user_id, post_id) VALUES (?, ?)',
                 [userId, postId]
             );
-            // Incrementa a contagem de likes no post
             await db.query(
                 'UPDATE posts SET likes = likes + 1 WHERE id = ?',
                 [postId]
@@ -105,6 +107,7 @@ router.post('/:postId/like', authMiddleware, async (req, res) => {
         }
 
     } catch (error) {
+        // Loga o erro, mas agora o erro de FK não deve mais acontecer aqui
         console.error('Erro ao processar like/unlike:', error);
         res.status(500).json({ message: 'Erro interno do servidor.' });
     }
@@ -115,28 +118,30 @@ router.post('/:postId/like', authMiddleware, async (req, res) => {
 // 3. Rota para o Feed Principal (GET /api/posts/feed)
 // --------------------------------------------------
 router.get('/feed', authMiddleware, async (req, res) => {
-    const userId = req.user.id; // ID do usuário logado para verificar se ele curtiu o post
+    const userId = req.user.id;
 
     try {
-        // Query para buscar posts e verificar se o usuário logado curtiu cada um
         const [posts] = await db.query(`
             SELECT 
                 p.id, p.title, p.description, p.video_url, p.thumbnail_url, p.likes, p.views, 
                 u.name as user_name, u.email as user_email,
-                CASE WHEN pl.user_id IS NOT NULL THEN TRUE ELSE FALSE END AS is_liked 
+                CASE WHEN pl.user_id IS NOT NULL THEN TRUE ELSE FALSE END AS is_liked,
+                (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id = p.id) AS comments_count
             FROM posts p
             JOIN users u ON p.user_id = u.id
             LEFT JOIN post_likes pl ON p.id = pl.post_id AND pl.user_id = ?
             WHERE p.visibility = "public"
             ORDER BY p.created_at DESC
             LIMIT 10
-        `, [userId]); // Passa o userId para o LEFT JOIN
+        `, [userId]);
 
         if (posts.length === 0) {
+            // Retorna post simulado
             return res.json({
                 message: 'Nenhum post encontrado. Retornando dados simulados.',
                 posts: [
-                    { id: 99, title: 'Mock Post: UI Design', description: 'Simulação de um projeto de UI/UX moderno.', video_url: 'https://assets.mixkit.co/videos/preview/mixkit-man-working-on-his-laptop-330-large.mp4', thumbnail_url: 'https://via.placeholder.com/600x1000?text=Mock+Thumb', likes: 120, views: 500, user_name: 'Dev Teste', user_email: 'dev@teste.com', is_liked: false },
+                    // MANTEM ID ALTO PARA SIMULAR DADO, mas o backend irá barrar o like
+                    { id: 99, title: 'Mock Post: UI Design', description: 'Simulação de um projeto de UI/UX moderno.', video_url: 'https://assets.mixkit.co/videos/preview/mixkit-man-working-on-his-laptop-330-large.mp4', thumbnail_url: 'https://via.placeholder.com/600x1000?text=Mock+Thumb', likes: 120, views: 500, user_name: 'Dev Teste', user_email: 'dev@teste.com', is_liked: false, comments_count: 5 },
                 ]
             });
         }
@@ -151,7 +156,68 @@ router.get('/feed', authMiddleware, async (req, res) => {
 
 
 // --------------------------------------------------
-// 4. Rota para Perfil e Posts (GET /api/posts/profile/:userId)
+// 4. Rota de Adicionar Comentário (POST /api/posts/:postId/comments)
+// --------------------------------------------------
+router.post('/:postId/comments', authMiddleware, async (req, res) => {
+    const userId = req.user.id;
+    const postId = req.params.postId;
+    const { content } = req.body;
+
+    if (!postId || !content || content.trim().length === 0) {
+        return res.status(400).json({ message: 'ID do Post e conteúdo do comentário são obrigatórios.' });
+    }
+
+    try {
+        const [result] = await db.query(
+            'INSERT INTO post_comments (post_id, user_id, content) VALUES (?, ?, ?)',
+            [postId, userId, content]
+        );
+
+        res.status(201).json({ 
+            message: 'Comentário adicionado com sucesso.', 
+            commentId: result.insertId,
+            userId: userId
+        });
+
+    } catch (error) {
+        console.error('Erro ao adicionar comentário:', error);
+        res.status(500).json({ message: 'Erro interno do servidor ao adicionar comentário.' });
+    }
+});
+
+
+// --------------------------------------------------
+// 5. Rota para Buscar Comentários (GET /api/posts/:postId/comments)
+// --------------------------------------------------
+router.get('/:postId/comments', authMiddleware, async (req, res) => {
+    const postId = req.params.postId;
+
+    if (!postId) {
+        return res.status(400).json({ message: 'ID do Post é obrigatório.' });
+    }
+
+    try {
+        const [comments] = await db.query(`
+            SELECT 
+                pc.id, pc.content, pc.created_at,
+                u.id AS user_id, u.name AS user_name, u.profile_picture_url
+            FROM post_comments pc
+            JOIN users u ON pc.user_id = u.id
+            WHERE pc.post_id = ?
+            ORDER BY pc.created_at DESC
+        `, [postId]);
+
+        res.json({ comments: comments });
+
+    } catch (error) {
+        console.error('Erro ao buscar comentários:', error);
+        res.status(500).json({ message: 'Erro interno do servidor ao buscar comentários.' });
+    }
+});
+
+
+// --------------------------------------------------
+// 6. Rota para Perfil e Posts (GET /api/posts/profile/:userId)
 // --------------------------------------------------
 router.get('/profile/:userId', authMiddleware, async (req, res) => {
     const targetUserId = req.params.userId;
@@ -161,7 +227,6 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
     }
 
     try {
-        // 1. Buscar Dados do Usuário (Perfil)
         const [users] = await db.query(
             'SELECT id, name, email, bio, location, job_title, skills, profile_picture_url FROM users WHERE id = ?', 
             [targetUserId]
@@ -172,7 +237,6 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
             return res.status(404).json({ message: 'Perfil não encontrado.' });
         }
         
-        // Dados simulados para o perfil
         if (!userProfile.bio) userProfile.bio = "Editor de vídeo apaixonado por contar histórias.";
         if (!userProfile.location) userProfile.location = "São Paulo, Brasil";
         if (!userProfile.job_title) userProfile.job_title = "Editor(a) de Vídeo";
@@ -180,7 +244,6 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
         if (!userProfile.profile_picture_url) userProfile.profile_picture_url = "https://lh3.googleusercontent.com/aida-public/AB6AXuAX6x7ogB02_IUN6VFkgzfxjSjBK3tPs2l7PGbzdMqtbxHTtxSHpSWBk5liz_aL-hYLa-Lot41BhbI28bQ1HL0yvUFTB3Hp2dUztUcun6juA5Gbf8vE1Ujd3sccShjP7HpbfzU1meivQPkVJhXU5o5XJbiMJFX148wu0NRY31S7mfqZlvewZId4GCnKznPdFFat0X3rUPYgl7y6z5gW5qeoQ85zgDxCHWtWTCYFT43TUGa-_NKGmqtaGJPd-zkjrSbXDTUG9djotOKF";
 
 
-        // 2. Buscar Posts do Usuário
         const [posts] = await db.query(
             'SELECT id, title, thumbnail_url FROM posts WHERE user_id = ? AND visibility = "public" ORDER BY created_at DESC', 
             [targetUserId]
@@ -199,7 +262,7 @@ router.get('/profile/:userId', authMiddleware, async (req, res) => {
 
 
 // --------------------------------------------------
-// 5. Rota de Busca (GET /api/posts/search)
+// 7. Rota de Busca (GET /api/posts/search)
 // --------------------------------------------------
 router.get('/search', authMiddleware, async (req, res) => {
     const { query, type = 'projects' } = req.query; 
@@ -211,7 +274,6 @@ router.get('/search', authMiddleware, async (req, res) => {
 
     try {
         if (type === 'freelancers') {
-            // Busca por Freelancers (Usuários)
             const [freelancers] = await db.query(
                 `SELECT id, name, job_title, profile_picture_url, location, skills 
                  FROM users 
@@ -222,7 +284,6 @@ router.get('/search', authMiddleware, async (req, res) => {
             return res.json({ type: 'freelancers', results: freelancers });
 
         } else { // type === 'projects' (Default)
-            // Busca por Projetos (Posts)
             const [projects] = await db.query(
                 `SELECT 
                     p.id, p.title, p.description, p.thumbnail_url,
