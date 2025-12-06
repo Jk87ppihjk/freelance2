@@ -1,53 +1,57 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config(); // Carrega as variáveis de ambiente
+require('dotenv').config(); 
 
-// Importa as configurações/rotas
+// --- Configurações/Importações de Módulos ---
+// NOTA: Estes arquivos (db.js, cloudinary.js, etc.) devem estar na mesma pasta ou no caminho correto.
 const db = require('./db'); 
 const cloudinary = require('./cloudinary'); 
-const publicRoutes = require('./routes'); // Rotas gerais (como /db-test)
-const authRoutes = require('./authRoutes'); // Rotas de Login/Cadastro
-const postRoutes = require('./postRoutes'); // Rotas do Feed/Posts
+const publicRoutes = require('./routes');
+const authRoutes = require('./authRoutes'); 
+const postRoutes = require('./postRoutes');
+const userRoutes = require('./userRoutes'); // ⬅️ IMPORTAÇÃO ESSENCIAL PARA ROTAS DE PERFIL
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+// Usa a porta definida no .env (como 8080) ou a padrão do ambiente (como 3000 na Render)
+const PORT = process.env.PORT || 8080; 
 
 // --- Configuração de Middlewares ---
 
-// CORS: Libera o acesso para todos os domínios (Conforme solicitado)
+// CORS: Permite que seu frontend (em outro domínio) acesse o backend
 app.use(cors({
-    origin: '*', 
+    origin: '*', // Permite qualquer origem (em produção, mude para o domínio do seu frontend)
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     preflightContinue: false,
     optionsSuccessStatus: 204
 }));
 
-// Body Parser: Permite que o Express leia JSON do corpo das requisições
+// Body Parser: Permite que o Express leia JSON e dados de formulário
 app.use(express.json());
+// Para lidar com dados de formulários simples (necessário para alguns uploads)
+app.use(express.urlencoded({ extended: true }));
 
-// --- Rotas ---
-app.use('/api', publicRoutes); // Ex: /api/public/status
-app.use('/api/auth', authRoutes); // Ex: /api/auth/register, /api/auth/login
-app.use('/api/posts', postRoutes); // Ex: /api/posts/feed
 
-// Rota de fallback para 404
+// --- Configuração de Rotas ---
+
+// Rotas públicas (ex: Status/Saúde do servidor)
+app.use('/api', publicRoutes);
+
+// Rotas de Autenticação (Login/Cadastro)
+app.use('/api/auth', authRoutes); 
+
+// Rotas de Posts (Criação, Feed, Curtir, Comentar, Deletar)
+app.use('/api/posts', postRoutes);
+
+// Rotas de Usuário/Perfil (Buscar Perfil, /me, Edição de Perfil e Foto)
+app.use('/api/users', userRoutes); // ⬅️ LINHA DE USO ESSENCIAL PARA RESOLVER O ERRO 404
+
+
+// Rota de Fallback para 404 (Tratamento de rotas não encontradas)
 app.use((req, res) => {
     res.status(404).json({ message: 'Rota não encontrada.' });
 });
 
 // --- Inicialização do Servidor ---
-
 app.listen(PORT, () => {
-    console.log(`\n======================================================`);
-    console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
-    console.log(`======================================================`);
-
-    // Log das variáveis de ambiente após a inicialização (conforme solicitado)
-    console.log('\n--- VARIÁVEIS DE AMBIENTE INICIADAS (LOG DE DEPLOY) ---');
-    console.log(`CLOUDINARY_CLOUD_NAME: ${process.env.CLOUDINARY_CLOUD_NAME ? 'OK' : 'FALHOU'}`);
-    console.log(`DB_HOST: ${process.env.DB_HOST}`);
-    console.log(`DB_NAME: ${process.env.DB_NAME ? 'OK' : 'FALHOU'}`);
-    console.log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'OK' : 'FALHOU'}`);
-    console.log(`PORT: ${process.env.PORT}`);
-    console.log('------------------------------------------------------\n');
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
