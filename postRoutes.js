@@ -141,7 +141,6 @@ router.get('/feed', authMiddleware, async (req, res) => {
             return res.json({
                 message: 'Nenhum post encontrado. Retornando dados simulados.',
                 posts: [
-                    // MANTEM ID ALTO PARA SIMULAR DADO. O backend irá barrar as interações se não for real.
                     { id: 99, title: 'Mock Post: UI Design', description: 'Simulação de um projeto de UI/UX moderno.', video_url: 'https://assets.mixkit.co/videos/preview/mixkit-man-working-on-his-laptop-330-large.mp4', thumbnail_url: 'https://via.placeholder.com/600x1000?text=Mock+Thumb', likes: 120, views: 500, user_name: 'Dev Teste', user_email: 'dev@teste.com', is_liked: false, comments_count: 5 },
                 ]
             });
@@ -169,13 +168,13 @@ router.post('/:postId/comments', authMiddleware, async (req, res) => {
     }
 
     try {
-        // --- VERIFICAÇÃO DE EXISTÊNCIA DO POST (CORREÇÃO) ---
+        // --- VERIFICAÇÃO DE EXISTÊNCIA DO POST ---
         const [posts] = await db.query('SELECT id FROM posts WHERE id = ?', [postId]);
         if (posts.length === 0) {
             console.warn(`Tentativa de comentar em post com ID não existente: ${postId}`);
             return res.status(404).json({ message: 'Post não encontrado no banco de dados. Impossível comentar.' });
         }
-        // -----------------------------------------------------
+        // -----------------------------------------
 
         const [result] = await db.query(
             'INSERT INTO post_comments (post_id, user_id, content) VALUES (?, ?, ?)',
@@ -310,6 +309,42 @@ router.get('/search', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error('Erro na busca:', error);
         res.status(500).json({ message: 'Erro interno do servidor durante a busca.' });
+    }
+});
+
+
+// --------------------------------------------------
+// 8. NOVA Rota para Deletar Post (DELETE /api/posts/:postId)
+// --------------------------------------------------
+router.delete('/:postId', authMiddleware, async (req, res) => {
+    const userId = req.user.id;
+    const postId = req.params.postId;
+
+    if (!postId) {
+        return res.status(400).json({ message: 'ID do Post é obrigatório para exclusão.' });
+    }
+
+    try {
+        // Tenta deletar o post, mas apenas se ele pertencer ao usuário logado (userId)
+        const [result] = await db.query(
+            'DELETE FROM posts WHERE id = ? AND user_id = ?',
+            [postId, userId]
+        );
+
+        if (result.affectedRows === 0) {
+            // Se nenhum post foi deletado, pode ser porque:
+            // 1. O post não existe.
+            // 2. O post existe, mas não pertence ao usuário logado (tentativa de exclusão não autorizada).
+            return res.status(404).json({ message: 'Post não encontrado ou você não tem permissão para deletá-lo.' });
+        }
+
+        // Devido às Chaves Estrangeiras (ON DELETE CASCADE),
+        // likes e comentários associados também serão deletados automaticamente.
+        res.json({ message: 'Post deletado com sucesso!' });
+
+    } catch (error) {
+        console.error('Erro ao deletar post:', error);
+        res.status(500).json({ message: 'Erro interno do servidor ao deletar post.' });
     }
 });
 
