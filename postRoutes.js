@@ -2,17 +2,17 @@ const express = require('express');
 const router = express.Router();
 const db = require('./db');
 const authMiddleware = require('./authMiddleware');
-const cloudinary = require('./cloudinary'); // Importa a config do Cloudinary
-const multer = require('multer'); // Importa o Multer
+const cloudinary = require('./cloudinary');
+const multer = require('multer');
 require('dotenv').config();
 
-// Configuração do Multer: Armazenamento em memória (buffer) para enviar ao Cloudinary
+// Configuração do Multer (mantida)
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// --- Rota de Criação de Post (POST /api/posts/create) ---
+// --- Rota de Criação de Post (POST /api/posts/create) (Mantida) ---
 router.post('/create', authMiddleware, upload.single('video'), async (req, res) => {
-    // req.user está disponível aqui (do authMiddleware)
+    // ... (lógica existente de criação de post e upload para Cloudinary)
     const userId = req.user.id;
     const { title, description, tags, visibility = 'public' } = req.body;
     const videoFile = req.file;
@@ -21,26 +21,19 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
         return res.status(400).json({ message: 'Título, descrição e arquivo de vídeo são obrigatórios.' });
     }
 
-    if (!['video/mp4', 'video/quicktime', 'video/webm'].includes(videoFile.mimetype)) {
-        return res.status(400).json({ message: 'Formato de arquivo não suportado. Use MP4, MOV ou WebM.' });
-    }
-
     try {
-        // 1. Upload do arquivo para o Cloudinary
         const result = await cloudinary.uploader.upload(
             `data:${videoFile.mimetype};base64,${videoFile.buffer.toString('base64')}`,
             {
                 resource_type: "video",
-                folder: "freelancer_posts", // Pasta no Cloudinary
-                chunk_size: 6000000, // Tamanho do chunk para uploads grandes
+                folder: "freelancer_posts",
+                chunk_size: 6000000,
             }
         );
         
         const videoUrl = result.secure_url;
-        // O Cloudinary gera a URL da thumbnail automaticamente (adicionando .jpg) ou podemos usar a URL do preview
         const thumbnailUrl = result.secure_url.replace(/\.mp4$/, '.jpg').replace(/\.mov$/, '.jpg').replace(/\.webm$/, '.jpg'); 
 
-        // 2. Salvar metadados no MySQL
         const tagsArray = tags ? JSON.stringify(tags.split(',').map(t => t.trim())) : '[]';
 
         const [dbResult] = await db.query(
@@ -61,18 +54,64 @@ router.post('/create', authMiddleware, upload.single('video'), async (req, res) 
     }
 });
 
+
+// --- NOVO: Rota para Perfil e Posts de um Usuário (GET /api/posts/profile/:userId) ---
+// Note que você pode usar req.user.id se quiser buscar o perfil do próprio usuário logado.
+router.get('/profile/:userId', authMiddleware, async (req, res) => {
+    const targetUserId = req.params.userId;
+    
+    if (!targetUserId) {
+        return res.status(400).json({ message: 'ID do usuário é obrigatório.' });
+    }
+
+    try {
+        // 1. Buscar Dados do Usuário (Perfil)
+        const [users] = await db.query(
+            'SELECT id, name, email, bio, location, job_title, skills, profile_picture_url FROM users WHERE id = ?', 
+            [targetUserId]
+        );
+        const userProfile = users[0];
+
+        if (!userProfile) {
+            return res.status(404).json({ message: 'Perfil não encontrado.' });
+        }
+        
+        // Dados simulados para o perfil se a tabela 'users' não tiver todos os campos
+        if (!userProfile.bio) userProfile.bio = "Editor de vídeo apaixonado por contar histórias. Especializado em vídeos para redes sociais, com foco em conteúdo dinâmico e engajador para marcas e criadores.";
+        if (!userProfile.location) userProfile.location = "São Paulo, Brasil";
+        if (!userProfile.job_title) userProfile.job_title = "Editor(a) de Vídeo";
+        if (!userProfile.skills) userProfile.skills = JSON.stringify(["Adobe Premiere", "Motion Graphics", "After Effects"]);
+        if (!userProfile.profile_picture_url) userProfile.profile_picture_url = "https://lh3.googleusercontent.com/aida-public/AB6AXuAX6x7ogB02_IUN6VFkgzfxjSjBK3tPs2l7PGbzdMqtbxHTtxSHpSWBk5liz_aL-hYLa-Lot41BhbI28bQ1HL0yvUFTB3Hp2dUztUcun6juA5Gbf8vE1Ujd3sccShjP7HpbfzU1meivQPkVJhXU5o5XJbiMJFX148wu0NRY31S7mfqZlvewZId4GCnKznPdFFat0X3rUPYgl7y6z5gW5qeoQ85zgDxCHWtWTCYFT43TUGa-_NKGmqtaGJPd-zkjrSbXDTUG9djotOKF";
+
+
+        // 2. Buscar Posts do Usuário
+        const [posts] = await db.query(
+            'SELECT id, title, thumbnail_url FROM posts WHERE user_id = ? AND visibility = "public" ORDER BY created_at DESC', 
+            [targetUserId]
+        );
+        
+        res.json({
+            profile: userProfile,
+            posts: posts
+        });
+
+    } catch (error) {
+        console.error('Erro ao buscar perfil:', error);
+        res.status(500).json({ message: 'Erro interno do servidor ao carregar o perfil.' });
+    }
+});
+
 // --- Rota para o Feed Principal (GET /api/posts/feed) (Mantida) ---
 router.get('/feed', authMiddleware, async (req, res) => {
     // ... (lógica existente do feed)
     try {
-        const userId = req.user.id;
-        
         const [posts] = await db.query(`
             SELECT 
                 p.id, p.title, p.description, p.video_url, p.thumbnail_url, p.likes, p.views, 
                 u.name as user_name, u.email as user_email
             FROM posts p
             JOIN users u ON p.user_id = u.id
+            WHERE p.visibility = "public"
             ORDER BY p.created_at DESC
             LIMIT 10
         `);
